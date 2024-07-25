@@ -1,0 +1,95 @@
+---
+# ROLE: MYSQL
+#
+# DESCRIPTION:
+# This role sets up the baseline configuration for a MySQL database.
+
+
+###############################################################################
+################### VARIABLE INITIALIZATION & TASK SETUP ######################
+###############################################################################
+
+
+# MYSQL_ROOT_PASSWORD
+# Set the root password for the MySQL system
+- name: MYSQL_ROOT_PASSWORD set fact from env if possible
+  set_fact:
+    MYSQL_ROOT_PASSWORD: "{{ lookup('env', 'MYSQL_ROOT_PASSWORD') | default('') | trim }}"
+  when: lookup('env', 'MYSQL_ROOT_PASSWORD') | default('', true) | trim != ''
+- name: MYSQL_ROOT_PASSWORD prompt user input if unset
+  pause:
+    prompt: "SET MYSQL_ROOT_PASSWORD"
+    echo: yes
+  register: input
+  when: MYSQL_ROOT_PASSWORD is not defined
+- name: Set MYSQL_ROOT_PASSWORD fact from user input
+  set_fact:
+    MYSQL_ROOT_PASSWORD: "{{ input.user_input | default('') | trim }}"
+  when: MYSQL_ROOT_PASSWORD is not defined
+
+
+###############################################################################
+############################ ROLE IMPLEMENTATION ##############################
+###############################################################################
+
+
+# Step 1: Install MySQL on Server
+
+- name: Install MySQL Server and Client
+  apt:
+    name:
+      - mysql-server
+      - mysql-client
+      - python3-mysqldb
+    state: present
+  become: yes
+
+- name: Start and enable MySQL service
+  service:
+    name: mysql
+    state: started
+    enabled: yes
+  become: yes
+
+# Step 2: Secure MySQL Installation
+
+- name: Check if MySQL has already been secured
+  stat:
+    path: /etc/mysql/.secured
+  register: mysql_secured
+
+- name: Secure MySQL Installation
+  # Using the `mysql_secure_installation` equivalent for Ansible.
+  # Assumes you're setting root password for the first time. Adjust accordingly.
+  mysql_user:
+    name: root
+    host_all: yes
+    password: "{{ MYSQL_ROOT_PASSWORD }}"
+    check_implicit_admin: yes
+    login_unix_socket: /var/run/mysqld/mysqld.sock
+  become: yes
+  when: not mysql_secured.stat.exists
+
+- name: Remove the anonymous MySQL user
+  mysql_user:
+    name: ""
+    host_all: yes
+    state: absent
+    login_user: root
+    login_password: "{{ MYSQL_ROOT_PASSWORD }}"
+  become: yes
+
+- name: Ensure test database is removed
+  mysql_db:
+    name: test
+    state: absent
+    login_user: root
+    login_password: "{{ MYSQL_ROOT_PASSWORD }}"
+  become: yes
+
+- name: Mark MySQL as secured
+  file:
+    path: /etc/mysql/.secured
+    state: touch
+  become: yes
+  when: not mysql_secured.stat.exists
